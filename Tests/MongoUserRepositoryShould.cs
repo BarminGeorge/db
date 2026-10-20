@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Game.Domain;
+using MongoDB.Bson;
 using MongoDB.Driver;
 using NUnit.Framework;
 
@@ -110,6 +111,56 @@ namespace Tests
             var user = repo.GetOrCreateByLogin("login");
             repo.Delete(user.Id);
             repo.FindById(user.Id).Should().BeNull();
+        }
+
+        [Test]
+        public void RejectInsertWithExistingId()
+        {
+            Action action = () => repo.Insert(new UserEntity(Guid.NewGuid()) { Login = "login" });
+            action.Should().Throw<InvalidOperationException>();
+        }
+
+        [Test]
+        public void DontInsertMissingUserOnUpdate()
+        {
+            var user = new UserEntity(Guid.NewGuid()) { Login = "login" };
+            repo.Update(user);
+            repo.FindById(user.Id).Should().BeNull();
+        }
+
+        [Test]
+        public void PersistGamesPlayedAfterFinishingGame()
+        {
+            var user = repo.GetOrCreateByLogin("login");
+            user.CurrentGameId = Guid.NewGuid();
+            repo.Update(user);
+
+            user = repo.FindById(user.Id);
+            user.ExitGame();
+            repo.Update(user);
+
+            var retrieved = new MongoUserRepository(TestMongoDatabase.Create()).FindById(user.Id);
+            retrieved.GamesPlayed.Should().Be(1);
+            retrieved.CurrentGameId.Should().BeNull();
+        }
+
+        [Test]
+        public void UseUniqueLoginIndex()
+        {
+            repo.GetOrCreateByLogin("login");
+            var db = TestMongoDatabase.Create();
+            var collection = db.GetCollection<UserEntity>(MongoUserRepository.CollectionName);
+            var index = collection.Indexes.List().ToList()
+                .Single(i => i["key"].AsBsonDocument.Contains("Login"));
+            index["unique"].AsBoolean.Should().BeTrue();
+
+            var plan = db.RunCommand<BsonDocument>(new BsonDocument("explain",
+                new BsonDocument
+                {
+                    { "find", MongoUserRepository.CollectionName },
+                    { "filter", new BsonDocument("Login", "login") }
+                }));
+            plan["queryPlanner"]["winningPlan"].ToJson().Should().Contain("IXSCAN");
         }
 
 
