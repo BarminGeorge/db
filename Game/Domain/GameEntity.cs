@@ -34,7 +34,6 @@ namespace Game.Domain
 
         public IReadOnlyList<Player> Players => players.AsReadOnly();
 
-        [BsonElement]
         public int TurnsCount { get; }
 
         public int CurrentTurnIndex { get; private set; }
